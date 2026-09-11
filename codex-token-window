@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# 打开或唤醒用量窗口：已有窗口就唤到前面，否则让伴随脚本开一个，都没有就自己起。
+DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+PORT="${CODEX_USAGE_PORT:-8788}"
+CLS="[Cc]odex[Uu]sage"
+
+WID=$(xdotool search --class "$CLS" 2>/dev/null | head -1)
+if [ -n "$WID" ]; then
+  xdotool windowmap "$WID" 2>/dev/null
+  xdotool windowraise "$WID" 2>/dev/null
+  xdotool windowactivate "$WID" 2>/dev/null
+  exit 0
+fi
+
+if pgrep -f "codex-usage-companion\.sh$" >/dev/null 2>&1; then
+  : > "$DIR/reopen.request"
+  exit 0
+fi
+
+if ! curl -s -m 2 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
+  ( cd "$DIR" && setsid nohup node dashboard-server.mjs >>"$DIR/companion.log" 2>&1 </dev/null & )
+  sleep 1
+fi
+exec "$DIR/window-impl.sh"

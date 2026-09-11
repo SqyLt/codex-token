@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# codex-usage —— 终端面板入口（自定位：可以在任意位置 clone 后直接跑）
+DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+exec node "$DIR/codex-usage.mjs" "$@"

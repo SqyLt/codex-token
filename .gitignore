@@ -1,0 +1,5 @@
+# 运行时产物，不属于源码
+companion.log
+window.state
+__pycache__/
+*.pyc

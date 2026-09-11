@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codex 用量面板</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12151a; --line:#1f242c; --text:#e6e8eb; --muted:#8b929c;
+    --accent:#4c9aff; --green:#3fb950; --amber:#d29922; --red:#f85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","PingFang SC",sans-serif}
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:14px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+  .brand{display:flex;align-items:center;gap:10px;min-width:0}
+  h1{font-size:16px;margin:0;font-weight:600;white-space:nowrap}
+  .controls{display:flex;align-items:center;gap:8px}
+  select,button{background:var(--panel);color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:5px 9px;font:inherit;max-width:340px}
+  button{cursor:pointer}
+  button:hover{border-color:#2c333d}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+  .dot.live{background:var(--green)}
+  .dot.idle{background:#3a4250}
+  .dot.err{background:var(--red)}
+  .muted{color:var(--muted)}
+  main{padding:20px;max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+  .hero{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr);gap:24px;
+    align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px}
+  .label{color:var(--muted);font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+  .big{font-size:56px;line-height:1.05;font-weight:600;margin:6px 0 4px;font-variant-numeric:tabular-nums}
+  .bar{height:10px;background:#1a1f27;border-radius:5px;overflow:hidden;margin:10px 0 8px}
+  .bar > i{display:block;height:100%;background:var(--accent);border-radius:5px;transition:width .3s}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px 14px}
+  .stat .v{font-size:22px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums}
+  .stat .s{color:var(--muted);font-size:12px;margin-top:2px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .panelHead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
+  .panelHead h2{font-size:13px;margin:0;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+  svg{width:100%;height:90px;display:block}
+  .axis{display:flex;justify-content:space-between;color:var(--muted);font-size:11px;margin-top:4px}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-weight:500;font-size:12px}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr.clickable{cursor:pointer}
+  tbody tr.clickable:hover{background:#161a20}
+  tbody tr.sel{background:#182131}
+  .cwd{color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:bottom}
+  footer{color:var(--muted);font-size:12px;padding:0 20px 28px;max-width:1100px;margin:0 auto}
+  .empty{color:var(--muted);padding:8px 0}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="dot idle" id="dot"></span>
+    <h1>Codex 用量面板</h1>
+    <span class="muted" id="statusText">连接中…</span>
+  </div>
+  <div class="controls">
+    <select id="sessionSelect" title="选择会话"></select>
+    <button id="pauseBtn" type="button">暂停刷新</button>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div>
+      <div class="label">会话缓存命中率</div>
+      <div class="big" id="heroHit">–</div>
+      <div class="muted" id="heroSub">等待数据…</div>
+    </div>
+    <div>
+      <div class="label">当前上下文占用</div>
+      <div class="bar"><i id="ctxBar" style="width:0%"></i></div>
+      <div class="muted" id="ctxText">–</div>
+    </div>
+  </section>
+
+  <section class="stats" id="stats"></section>
+
+  <section class="panel">
+    <div class="panelHead">
+      <h2>最近调用命中率</h2>
+      <span class="muted" id="sparkNote">–</span>
+    </div>
+    <svg id="spark" viewBox="0 0 480 90" preserveAspectRatio="none"></svg>
+    <div class="axis"><span>更早</span><span>最近一次</span></div>
+  </section>
+
+  <section class="panel">
+    <div class="panelHead">
+      <h2>最近调用明细</h2>
+      <span class="muted">每次模型调用一行 · 最新 12 次</span>
+    </div>
+    <table>
+      <thead><tr>
+        <th>时间</th><th>input</th><th>cached</th><th>命中率</th><th>output</th><th>reasoning</th>
+      </tr></thead>
+      <tbody id="callsBody"></tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <div class="panelHead">
+      <h2>会话列表</h2>
+      <span class="muted" id="sessionsNote">–</span>
+    </div>
+    <table>
+      <thead><tr>
+        <th>会话</th><th>线程</th><th>模型</th><th>目录</th><th>累计 input</th><th>cached</th><th>命中率</th><th>output</th>
+      </tr></thead>
+      <tbody id="sessionsBody"></tbody>
+    </table>
+  </section>
+</main>
+
+<footer>
+  数据来源：本机 rollout JSONL（token_usage_record / token_count / session_meta），只读、不联网。<br>
+  命中率 = cached_input_tokens / input_tokens；“累计 input”是该会话所有轮次重放上下文之和，不是当前上下文大小。
+</footer>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => (n == null ? '–' : Math.round(n).toLocaleString('en-US'));
+  const shortId = (id) => (id || '').slice(0, 8);
+  const clock = (ts) => { const d = new Date(ts); const p = (x) => String(x).padStart(2, '0');
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); };
+  const hitColor = (r) => (r == null ? 'var(--muted)' : r >= 90 ? 'var(--green)' : r >= 60 ? 'var(--amber)' : 'var(--red)');
+  const hitText = (r) => (r == null ? '–' : r.toFixed(1) + '%');
+
+  let selected = decodeURIComponent(location.hash.slice(1)) || localStorage.getItem('codexUsageSession') || '';
+  let paused = false;
+  let latest = null;
+
+  function setConn(kind, text) {
+    $('dot').className = 'dot ' + kind;
+    $('statusText').textContent = text;
+  }
+
+  function renderHero(u) {
+    const r = u.thread ? u.thread.hit_rate : null;
+    $('heroHit').textContent = hitText(r);
+    $('heroHit').style.color = hitColor(r);
+    $('heroSub').textContent = u.thread
+      ? 'cached ' + fmt(u.thread.cached) + '  /  input ' + fmt(u.thread.input) +
+        '   ·   未缓存 ' + fmt(Math.max(0, u.thread.input - u.thread.cached)) + '   ·   调用 ' + u.calls + ' 次'
+      : '等待第一次调用…';
+
+    const pct = u.context_percent;
+    $('ctxBar').style.width = (pct == null ? 0 : Math.min(100, pct)) + '%';
+    $('ctxBar').style.background = pct >= 85 ? 'var(--red)' : pct >= 60 ? 'var(--amber)' : 'var(--accent)';
+    $('ctxText').textContent = pct == null
+      ? '–'
+      : pct.toFixed(1) + '%   ' + fmt(u.context_used) + ' / ' + fmt(u.context_window);
+  }
+
+  function renderStats(u) {
+    const c = u.last_call;
+    const items = [
+      ['本次调用 in', c ? fmt(c.input) : '–', c ? '命中 ' + hitText(c.hit_rate) : ''],
+      ['本次调用 out', c ? fmt(c.output) : '–', c && c.reasoning ? '推理 ' + fmt(c.reasoning) : ''],
+      ['本轮累计 in', u.last_turn ? fmt(u.last_turn.input) : '–', u.last_turn ? '命中 ' + hitText(u.last_turn.hit_rate) : ''],
+      ['会话累计 output', u.thread ? fmt(u.thread.output) : '–', u.thread ? '推理 ' + fmt(u.thread.reasoning_output_tokens || 0) : ''],
+      ['cache_write', u.thread ? fmt(u.thread.cacheWrite) : '–', '写缓存比普通输入更贵'],
+      ['模型', u.model || '–', (u.model_provider || '') + (u.originator ? ' · ' + u.originator : '')],
+    ];
+    $('stats').innerHTML = items.map(([label, v, s]) =>
+      '<div class="stat"><div class="label">' + label + '</div><div class="v">' + v +
+      '</div><div class="s">' + (s || '') + '</div></div>').join('');
+  }
+
+  function renderSpark(hist) {
+    const data = (hist || []).slice(-40);
+    $('sparkNote').textContent = data.length
+      ? '近 ' + data.length + ' 次调用 · 平均 ' + (data.reduce((a, b) => a + b, 0) / data.length).toFixed(1) + '%'
+      : '暂无数据';
+    if (!data.length) { $('spark').innerHTML = ''; return; }
+    const W = 480, H = 90, gap = 2;
+    const bw = Math.max(1, W / data.length - gap);
+    let svg = '<line x1="0" y1="9" x2="' + W + '" y2="9" stroke="#2a313b" stroke-dasharray="4 4"/>' +
+      '<text x="2" y="7" fill="#8b929c" font-size="9">90%</text>';
+    data.forEach((v, i) => {
+      const h = Math.max(1, (Math.max(0, Math.min(100, v)) / 100) * (H - 6));
+      const x = i * (bw + gap);
+      svg += '<rect x="' + x.toFixed(2) + '" y="' + (H - h).toFixed(2) + '" width="' + bw.toFixed(2) +
+        '" height="' + h.toFixed(2) + '" fill="' + hitColor(v) + '" opacity="' +
+        (i === data.length - 1 ? '1' : '0.65') + '"/>';
+    });
+    $('spark').innerHTML = svg;
+  }
+
+  function renderCalls(calls) {
+    const rows = (calls || []).slice(-12).reverse();
+    $('callsBody').innerHTML = rows.length ? rows.map((c) =>
+      '<tr><td>' + (c.ts ? clock(c.ts) : '–') + '</td><td>' + fmt(c.input) + '</td><td>' + fmt(c.cached) +
+      '</td><td style="color:' + hitColor(c.hit_rate) + '">' + hitText(c.hit_rate) + '</td><td>' + fmt(c.output) +
+      '</td><td class="muted">' + fmt(c.reasoning) + '</td></tr>').join('')
+      : '<tr><td colspan="6" class="empty">这个会话还没有调用记录</td></tr>';
+  }
+
+  function renderSessions(rows) {
+    $('sessionsNote').textContent = '最近 ' + (latest ? latest.days : 1) + ' 天 · ' + rows.length + ' 个会话 · 点击可切换';
+    $('sessionsBody').innerHTML = rows.map((s) => {
+      const isSel = latest && latest.usage && (latest.usage.session_id === s.id);
+      return '<tr class="clickable' + (isSel ? ' sel' : '') + '" data-id="' + s.id + '">' +
+        '<td>' + (s.active ? '<span style="color:var(--green)">●</span> ' : '') + shortId(s.id) + '</td>' +
+        '<td class="muted">' + (s.thread || '') + '</td>' +
+        '<td>' + (s.model || '–') + '</td>' +
+        '<td><span class="cwd">' + (s.cwd || '–') + '</span></td>' +
+        '<td>' + fmt(s.input) + '</td><td>' + fmt(s.cached) + '</td>' +
+        '<td style="color:' + hitColor(s.hit) + '">' + hitText(s.hit) + '</td><td>' + fmt(s.output) + '</td></tr>';
+    }).join('');
+    document.querySelectorAll('#sessionsBody tr.clickable').forEach((tr) => {
+      tr.addEventListener('click', () => {
+        selected = tr.dataset.id;
+        localStorage.setItem('codexUsageSession', selected);
+        location.hash = encodeURIComponent(selected);
+        refresh();
+      });
+    });
+  }
+
+  function renderSelect(rows, u) {
+    const el = $('sessionSelect');
+    const current = u.session_id || '';
+    el.innerHTML = rows.map((s) =>
+      '<option value="' + s.id + '"' + (s.id === current ? ' selected' : '') + '>' +
+      shortId(s.id) + ' · ' + (s.thread || 'user') + ' · ' + (s.model || '?') + '</option>').join('');
+    if (!rows.some((s) => s.id === current) && current) {
+      el.insertAdjacentHTML('afterbegin', '<option value="' + current + '" selected>' + shortId(current) + ' · 当前</option>');
+    }
+  }
+
+  function render(data) {
+    latest = data;
+    if (data.error) {
+      setConn('err', data.error === 'no-session' ? '找不到会话记录' : '数据异常：' + data.error);
+      return;
+    }
+    const u = data.usage;
+    renderHero(u);
+    renderStats(u);
+    renderSpark(data.hit_history);
+    renderCalls(data.recent_calls);
+    renderSelect(data.sessions, u);
+    renderSessions(data.sessions);
+    const active = u.last_event_at && (data.now - Date.parse(u.last_event_at)) < 3000;
+    setConn(active ? 'live' : 'idle',
+      (active ? '进行中' : '空闲') + ' · ' + shortId(u.session_id) + ' · 最后用量 ' +
+      (u.last_event_at ? clock(Date.parse(u.last_event_at)) : '–'));
+  }
+
+  async function refresh() {
+    if (paused) return;
+    try {
+      const url = '/api/snapshot' + (selected ? '?session=' + encodeURIComponent(selected) : '');
+      const res = await fetch(url, { cache: 'no-store' });
+      render(await res.json());
+    } catch (e) {
+      setConn('err', '无法连接看板服务');
+    }
+  }
+
+  $('sessionSelect').addEventListener('change', (e) => {
+    selected = e.target.value;
+    localStorage.setItem('codexUsageSession', selected);
+    location.hash = encodeURIComponent(selected);
+    refresh();
+  });
+  $('pauseBtn').addEventListener('click', (e) => {
+    paused = !paused;
+    e.target.textContent = paused ? '继续刷新' : '暂停刷新';
+    if (!paused) refresh();
+  });
+
+  refresh();
+  setInterval(refresh, 1000);
+</script>
+</body>
+</html>
