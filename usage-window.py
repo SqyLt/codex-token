@@ -252,6 +252,7 @@ class UsageWindow:
         self._tick_n = 0
         self._resize = None
         self._save_job = None
+        self._call_rows = None
 
         fam = pick_font(root)
         self.f_title = (fam, 11, "bold")
@@ -535,7 +536,7 @@ class UsageWindow:
         self.calls_wrap.pack(fill="both", expand=True, pady=(6, 12), **pad)
         self.calls_canvas = tk.Canvas(
             self.calls_wrap, bg=PANEL, highlightthickness=1, highlightbackground=LINE,
-            bd=0, height=200, yscrollincrement=0,
+            bd=0, height=200, yscrollincrement=24,  # 1 unit = 一行，便于按行补偿滚动
         )
         self.calls_scroll = tk.Scrollbar(
             self.calls_wrap, orient="vertical", command=self.calls_canvas.yview,
@@ -837,37 +838,96 @@ class UsageWindow:
             c.create_rectangle(x, h - bh, x + bw, h, fill=hit_color(v), outline="")
 
     def render_calls(self, calls):
+        """增量更新最近调用列表。
+
+        以前每次刷新都把子控件全部 destroy 再重建，数据一到就闪一下（正好会露出空白帧）。
+        现在只增删真正变化的行：已有行的控件原样留在那里，新行插到对应位置。
+        """
+        target = list(reversed(calls))  # 最新的排在最上面
+        keys = [self._call_key(c) for c in target]
+        self.calls_count.configure(
+            text=("共 %d 次 · 滚轮可翻看" % len(target)) if target else "")
+
+        rows = getattr(self, "_call_rows", None)
+        if not target or not rows:
+            self._rebuild_calls(target)
+            return
+        # 会话切换时（几乎没有重叠）才整表重建
+        if len({k for k, _ in rows} & set(keys)) < min(len(keys), len(rows), 3):
+            self._rebuild_calls(target)
+            return
+
         try:
-            keep = self.calls_canvas.yview()[0]
+            scrolled = self.calls_canvas.yview()[0] > 0.001
         except Exception:
-            keep = 0.0
+            scrolled = False
+
+        # 1) 移除已经滑出窗口的旧行
+        wanted = set(keys)
+        for key, row in list(self._call_rows):
+            if key not in wanted:
+                row.destroy()
+                self._call_rows.remove((key, row))
+
+        # 2) 补上新行，插到对应位置以保持“最新在上”
+        existing = {k for k, _ in self._call_rows}
+        added = 0
+        for i, (c, key) in enumerate(zip(target, keys)):
+            if key in existing:
+                continue
+            row = self._make_call_row(c)
+            if i < len(self._call_rows):
+                row.pack(side="top", fill="x", before=self._call_rows[i][1])
+            else:
+                row.pack(side="top", fill="x")
+            self._call_rows.insert(i, (key, row))
+            existing.add(key)
+            added += 1
+        if added:
+            print("[calls] 增量 +%d 行，复用 %d 行" % (added, len(self._call_rows) - added),
+                  file=sys.stderr, flush=True)
+            self.refresh_scrollregion()
+            if scrolled:
+                # 用户正在回看历史：把视口跟着补上新增的行高度，画面不跳
+                try:
+                    self.calls_canvas.yview_scroll(added, "units")
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _call_key(c):
+        return (c.get("ts"), c.get("input"), c.get("cached"), c.get("output"))
+
+    def _make_call_row(self, c):
+        row = tk.Frame(self.calls_inner, bg=PANEL)
+        line = tk.Frame(row, bg=PANEL)
+        line.pack(fill="x", padx=10, pady=(4, 4))
+        tk.Label(line, text=clock(c["ts"]) if c.get("ts") else "–", bg=PANEL, fg=MUTED,
+                 font=self.f_mono).pack(side="left")
+        tk.Label(line, text="输入 %s" % fmt(c["input"]), bg=PANEL, fg=TEXT,
+                 font=self.f_mono).pack(side="left", padx=(10, 0))
+        tk.Label(line, text=hit_text(c.get("hit_rate")), bg=PANEL,
+                 fg=hit_color(c.get("hit_rate")), font=self.f_mono).pack(side="right")
+        tk.Label(line, text="输出 %s" % fmt(c["output"]), bg=PANEL, fg=MUTED,
+                 font=self.f_mono).pack(side="right", padx=(0, 10))
+        tk.Frame(row, bg=LINE, height=1).pack(fill="x")
+        return row
+
+    def _rebuild_calls(self, target):
         for child in self.calls_inner.winfo_children():
             child.destroy()
-        rows = list(reversed(calls))  # 最新的排在最上面
-        self.calls_count.configure(text=("共 %d 次 · 滚轮可翻看" % len(rows)) if rows else "")
-        if not rows:
+        self._call_rows = []
+        print("[calls] 整表重建 %d 行" % len(target), file=sys.stderr, flush=True)
+        if not target:
             tk.Label(self.calls_inner, text="暂无调用记录", bg=PANEL, fg=MUTED,
                      font=self.f_small).pack(anchor="w", padx=10, pady=8)
             self.refresh_scrollregion()
             return
-        for i, c in enumerate(rows):
-            bg = PANEL if i % 2 == 0 else "#161a20"
-            row = tk.Frame(self.calls_inner, bg=bg)
-            row.pack(fill="x", pady=(0 if i == 0 else 1, 0))
-            tk.Label(row, text=clock(c["ts"]) if c.get("ts") else "–", bg=bg, fg=MUTED,
-                     font=self.f_mono).pack(side="left")
-            tk.Label(row, text="输入 %s" % fmt(c["input"]), bg=bg, fg=TEXT,
-                     font=self.f_mono).pack(side="left", padx=(10, 0))
-            tk.Label(row, text=hit_text(c.get("hit_rate")), bg=bg,
-                     fg=hit_color(c.get("hit_rate")), font=self.f_mono).pack(side="right")
-            tk.Label(row, text="输出 %s" % fmt(c["output"]), bg=bg, fg=MUTED,
-                     font=self.f_mono).pack(side="right", padx=(0, 10))
-        tk.Frame(self.calls_inner, bg=PANEL, height=2).pack()
+        for c in target:
+            row = self._make_call_row(c)
+            row.pack(side="top", fill="x")
+            self._call_rows.append((self._call_key(c), row))
         self.refresh_scrollregion()
-        try:
-            self.calls_canvas.yview_moveto(keep)
-        except Exception:
-            pass
 
     def refresh_scrollregion(self):
         self.calls_inner.update_idletasks()
